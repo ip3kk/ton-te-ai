@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TON TE AI — AI-Powered TON Blockchain Assistant</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,700;0,9..40,900;1,9..40,300&display=swap" rel="stylesheet">
+<style>
+:root {
+  --ton-blue: #0098EA;
+  --ton-dark: #0A1929;
+  --ton-deeper: #060F1A;
+  --ton-accent: #00D4FF;
+  --ton-purple: #7B61FF;
+  --ton-green: #00C853;
+  --glow: 0 0 40px rgba(0,152,234,0.3);
+  --glass: rgba(255,255,255,0.04);
+  --glass-border: rgba(255,255,255,0.08);
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family: 'DM Sans', sans-serif;
+  background: var(--ton-deeper);
+  color: #E8F0FE;
+  overflow-x: hidden;
+}
+
+.bg-mesh {
+  position: fixed; inset: 0; z-index: 0;
+  background:
+    radial-gradient(ellipse 80% 60% at 20% 10%, rgba(0,152,234,0.15) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 50% at 80% 80%, rgba(123,97,255,0.1) 0%, transparent 60%),
+    radial-gradient(ellipse 40% 40% at 50% 50%, rgba(0,212,255,0.05) 0%, transparent 60%);
+  animation: meshMove 20s ease-in-out infinite;
+}
+@keyframes meshMove {
+  0%,100% { transform: scale(1) rotate(0deg); }
+  50% { transform: scale(1.05) rotate(1deg); }
+}
+
+.particles { position: fixed; inset: 0; z-index: 0; pointer-events: none; }
+.particle {
+  position: absolute;
+  width: 3px; height: 3px;
+  background: var(--ton-accent);
+  border-radius: 50%;
+  opacity: 0;
+  animation: float 8s ease-in-out infinite;
+}
+@keyframes float {
+  0% { opacity:0; transform: translateY(100vh) scale(0); }
+  20% { opacity:0.6; }
+  80% { opacity:0.3; }
+  100% { opacity:0; transform: translateY(-10vh) scale(1); }
+}
+
+.container { position: relative; z-index: 1; max-width: 1100px; margin: 0 auto; padding: 0 24px; }
+
+/* ── HERO ── */
+.hero {
+  min-height: 100vh;
+  display: flex; flex-direction: column;
+  justify-content: center; align-items: center;
+  text-align: center;
+  padding: 80px 24px 60px;
+}
+.hero-badge {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: var(--glass); border: 1px solid var(--glass-border);
+  border-radius: 100px; padding: 8px 20px;
+  font-size: 13px; font-family: 'Space Mono', monospace;
+  color: var(--ton-accent); letter-spacing: 1.5px; text-transform: uppercase;
+  margin-bottom: 32px; animation: fadeUp .8s ease-out;
+}
+.hero-badge .dot {
+  width: 8px; height: 8px; background: var(--ton-green);
+  border-radius: 50%; animation: pulse 2s ease-in-out infinite;
+}
+@keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.5;transform:scale(.8)} }
+
+.hero h1 {
+  font-size: clamp(52px, 9vw, 110px);
+  font-weight: 900; line-height: 1; letter-spacing: -4px;
+  margin-bottom: 12px; animation: fadeUp .8s ease-out .1s both;
+}
+.hero h1 .ton {
+  background: linear-gradient(135deg, var(--ton-blue), var(--ton-accent));
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+}
+.hero h1 .ai {
+  background: linear-gradient(135deg, var(--ton-purple), #FF6BCA);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+}
+.hero-sub {
+  font-size: clamp(18px, 2.5vw, 24px); font-weight: 300;
+  color: rgba(232,240,254,0.6); max-width: 620px; line-height: 1.5;
+  margin-bottom: 48px; animation: fadeUp .8s ease-out .2s both;
+}
+.hero-sub strong { color: #fff; font-weight: 500; }
+
+.hero-cta { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; animation: fadeUp .8s ease-out .3s both; }
+.btn {
+  display: inline-flex; align-items: center; gap: 10px;
+  padding: 16px 32px; border-radius: 14px; font-size: 16px; font-weight: 600;
+  text-decoration: none; transition: all .3s; cursor: pointer; border: none;
+}
+.btn-primary {
+  background: linear-gradient(135deg, var(--ton-blue), var(--ton-accent));
+  color: #fff; box-shadow: 0 4px 24px rgba(0,152,234,0.4);
+}
+.btn-primary:hover { transform: translateY(-2px); box-shadow: 0 8px 32px rgba(0,152,234,0.6); }
+.btn-ghost { background: var(--glass); border: 1px solid var(--glass-border); color: #E8F0FE; }
+.btn-ghost:hover { background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.15); }
+
+@keyframes fadeUp { from{opacity:0;transform:translateY(30px)} to{opacity:1;transform:translateY(0)} }
+
+/* ── STATS ── */
+.stats { display: grid; grid-template-columns: repeat(4,1fr); gap: 20px; margin: 60px 0; }
+.stat {
+  text-align: center; padding: 32px 16px;
+  background: var(--glass); border: 1px solid var(--glass-border); border-radius: 20px;
+}
+.stat-num {
+  font-size: 42px; font-weight: 900;
+  background: linear-gradient(135deg, var(--ton-blue), var(--ton-accent));
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+}
+.stat-label { font-size: 13px; color: rgba(232,240,254,0.5); margin-top: 8px; }
+
+/* ── FEATURES ── */
+.section { padding: 100px 0; }
+.section-label {
+  font-family: 'Space Mono', monospace; font-size: 12px;
+  letter-spacing: 3px; text-transform: uppercase; color: var(--ton-accent); margin-bottom: 16px;
+}
+.section-title {
+  font-size: clamp(32px, 5vw, 52px); font-weight: 900;
+  letter-spacing: -2px; margin-bottom: 60px; line-height: 1.1;
+}
+.features-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px,1fr)); gap: 20px; }
+.feature-card {
+  background: var(--glass); border: 1px solid var(--glass-border);
+  border-radius: 20px; padding: 36px 28px; transition: all .4s;
+  position: relative; overflow: hidden;
+}
+.feature-card::before {
+  content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+  background: linear-gradient(90deg, transparent, var(--ton-blue), transparent);
+  opacity: 0; transition: opacity .4s;
+}
+.feature-card:hover {
+  border-color: rgba(0,152,234,0.3); transform: translateY(-4px); box-shadow: var(--glow);
+}
+.feature-card:hover::before { opacity: 1; }
+.feature-icon { font-size: 36px; margin-bottom: 16px; display: block; }
+.feature-card h3 { font-size: 20px; font-weight: 700; margin-bottom: 10px; }
+.feature-card p { font-size: 14px; line-height: 1.6; color: rgba(232,240,254,0.55); }
+
+/* ── DEMO PHONE ── */
+.demo-section { display: flex; align-items: center; gap: 80px; padding: 100px 0; }
+.demo-text { flex: 1; }
+.demo-phone { flex: 0 0 320px; }
+.phone-frame {
+  width: 300px; height: 600px; background: #111;
+  border-radius: 40px; border: 3px solid #333;
+  overflow: hidden; position: relative;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.5), 0 0 80px rgba(0,152,234,0.1);
+}
+.phone-notch {
+  position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+  width: 120px; height: 28px; background: #111;
+  border-radius: 0 0 18px 18px; z-index: 2;
+}
+.phone-screen {
+  width: 100%; height: 100%; background: #0E1621;
+  padding: 40px 16px 16px; overflow-y: auto;
+}
+.phone-screen::-webkit-scrollbar { width: 0; }
+.chat-header {
+  display: flex; align-items: center; gap: 10px;
+  padding-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.06); margin-bottom: 16px;
+}
+.chat-avatar {
+  width: 36px; height: 36px; border-radius: 50%;
+  background: linear-gradient(135deg, var(--ton-blue), var(--ton-accent));
+  display: flex; align-items: center; justify-content: center; font-size: 18px;
+}
+.chat-name { font-weight: 700; font-size: 15px; }
+.chat-status { font-size: 11px; color: var(--ton-green); }
+
+.msg {
+  max-width: 85%; padding: 10px 14px; border-radius: 16px;
+  font-size: 13px; line-height: 1.5; margin-bottom: 8px;
+  opacity: 0; animation: msgIn .5s ease-out forwards;
+}
+.msg-bot { background: #1E2C3A; border-bottom-left-radius: 4px; color: #E8F0FE; }
+.msg-user {
+  background: var(--ton-blue); color: #fff;
+  margin-left: auto; border-bottom-right-radius: 4px;
+}
+.msg b { font-weight: 700; }
+@keyframes msgIn { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
+
+.btn-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; margin-bottom: 12px; }
+.chat-btn {
+  background: rgba(0,152,234,0.15); border: 1px solid rgba(0,152,234,0.3);
+  color: var(--ton-accent); padding: 6px 12px; border-radius: 8px; font-size: 11px;
+}
+
+/* ── TECH ── */
+.tech-row { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 32px; }
+.tech-tag {
+  background: var(--glass); border: 1px solid var(--glass-border);
+  border-radius: 10px; padding: 10px 18px;
+  font-family: 'Space Mono', monospace; font-size: 13px;
+  color: rgba(232,240,254,0.7); transition: all .3s;
+}
+.tech-tag:hover { border-color: var(--ton-blue); color: var(--ton-accent); }
+
+/* ── LANGS ── */
+.lang-grid { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 24px; }
+.lang-chip {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--glass); border: 1px solid var(--glass-border);
+  border-radius: 12px; padding: 12px 20px; font-size: 15px; transition: all .3s;
+}
+.lang-chip:hover { border-color: var(--ton-blue); transform: translateY(-2px); }
+
+/* ── FOOTER ── */
+.footer {
+  text-align: center; padding: 60px 24px;
+  border-top: 1px solid var(--glass-border); margin-top: 60px;
+}
+.footer-brand { font-size: 24px; font-weight: 900; margin-bottom: 12px; }
+.footer p { color: rgba(232,240,254,0.4); font-size: 14px; }
+
+/* ── RESPONSIVE ── */
+@media (max-width: 768px) {
+  .demo-section { flex-direction: column-reverse; gap: 40px; }
+  .demo-phone { flex: none; }
+  .stats { grid-template-columns: repeat(2,1fr); }
+}
+
+.reveal {
+  opacity: 0; transform: translateY(40px);
+  transition: all .8s cubic-bezier(.16,1,.3,1);
+}
+.reveal.visible { opacity: 1; transform: translateY(0); }
+</style>
+</head>
+<body>
+
+<div class="bg-mesh"></div>
+<div class="particles" id="particles"></div>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-badge"><span class="dot"></span> Identity Hub AI Hackathon 2026</div>
+  <h1><span class="ton">TON</span> TE <span class="ai">AI</span></h1>
+  <p class="hero-sub">The <strong>AI-powered assistant</strong> that lives inside Telegram.<br>Query TON with <strong>voice or text</strong> in 7 languages — red packets, inline NFT search, MCP sends.</p>
+  <div class="hero-cta">
+    <a href="https://t.me/TON_TE_Ai_bot" class="btn btn-primary" target="_blank">💎 Try @TON_TE_Ai_bot</a>
+    <a href="#features" class="btn btn-ghost">↓ See Features</a>
+  </div>
+</section>
+
+<!-- STATS -->
+<div class="container">
+  <div class="stats reveal">
+    <div class="stat"><div class="stat-num">7</div><div class="stat-label">UI Languages</div></div>
+    <div class="stat"><div class="stat-num">@ton/mcp</div><div class="stat-label">On-chain actions</div></div>
+    <div class="stat"><div class="stat-num">TonAPI</div><div class="stat-label">+ TonCenter v2</div></div>
+    <div class="stat"><div class="stat-num">STT→LLM→TTS</div><div class="stat-label">Voice pipeline</div></div>
+  </div>
+</div>
+
+<!-- FEATURES -->
+<section class="section container" id="features">
+  <div class="reveal">
+    <div class="section-label">Features</div>
+    <div class="section-title">Everything TON,<br>one chat away.</div>
+  </div>
+  <div class="features-grid">
+    <div class="feature-card reveal">
+      <span class="feature-icon">💎</span>
+      <h3>Token Scanner</h3>
+      <p>EQ/UQ contract → price, LP, holders, risk score, DEX pools. Data from TonAPI + STON.fi — no extra app.</p>
+    </div>
+    <div class="feature-card reveal">
+      <span class="feature-icon">📈</span>
+      <h3>Trending</h3>
+      <p>Hot jettons on TON from STON.fi. One tap from the reply keyboard.</p>
+    </div>
+    <div class="feature-card reveal">
+      <span class="feature-icon">🎙️</span>
+      <h3>Voice pipeline</h3>
+      <p><strong>Groq Whisper</strong> → <strong>DeepSeek</strong> (function calling) → <strong>cantonese.ai</strong> / Edge TTS. STT cascade with faster-whisper + Google fallback.</p>
+    </div>
+    <div class="feature-card reveal">
+      <span class="feature-icon">💱</span>
+      <h3>Swap quotes</h3>
+      <p>Natural language + MCP <code style="font-size:12px;opacity:.8">get_swap_quote</code>. STON.fi routing in the answer.</p>
+    </div>
+    <div class="feature-card reveal">
+      <span class="feature-icon">👛</span>
+      <h3>Wallet &amp; NFT</h3>
+      <p>Balance, txs, jettons, NFT list — TonCenter + TonAPI. Paste EQ/UQ or use buttons.</p>
+    </div>
+    <div class="feature-card reveal">
+      <span class="feature-icon">🔗</span>
+      <h3>DNS &amp; MCP send</h3>
+      <p><code>.ton</code> resolve on TonAPI. Send TON / jettons via <strong>@ton/mcp</strong> when the server is connected.</p>
+    </div>
+    <div class="feature-card reveal">
+      <span class="feature-icon">🧧</span>
+      <h3>On-chain red packets</h3>
+      <p>Inline <code>@TON_TE_Ai_bot 1 5</code> in any group → photo card → Open link → claim in DM. Payouts through MCP; SQLite tracks packets &amp; claims.</p>
+    </div>
+    <div class="feature-card reveal">
+      <span class="feature-icon">🖼</span>
+      <h3>Inline NFT search</h3>
+      <p>Type <code>@TON_TE_Ai_bot durov</code> or <code>foundation.ton</code> — TonAPI previews, Getgems / TONViewer / Fragment (auctions).</p>
+    </div>
+    <div class="feature-card reveal">
+      <span class="feature-icon">📝</span>
+      <h3>Translate mode</h3>
+      <p>Dedicated flow: any voice or text → output in your UI language (EN/ZH/YUE/RU/JA/KO/TH). No accidental TON tool calls.</p>
+    </div>
+  </div>
+</section>
+
+<!-- DEMO -->
+<section class="section container">
+  <div class="demo-section reveal">
+    <div class="demo-text">
+      <div class="section-label">Live Demo</div>
+      <div class="section-title">Talk to the<br>blockchain.</div>
+      <p style="color:rgba(232,240,254,0.55);font-size:16px;line-height:1.7;margin-bottom:24px;">No seed phrase in chat for reads. <strong>Judges:</strong> open the bot → <code style="font-size:13px;color:var(--ton-accent)">/start</code> → tap <strong>How to Use</strong> for the full demo script inside Telegram.</p>
+      <p style="color:rgba(232,240,254,0.45);font-size:14px;line-height:1.6;margin-bottom:32px;">Below: simulated chat. Real bot has the same flows + voice notes.</p>
+      <div class="lang-grid">
+        <div class="lang-chip">🇬🇧 English</div>
+        <div class="lang-chip">🇭🇰 廣東話</div>
+        <div class="lang-chip">🇨🇳 中文</div>
+        <div class="lang-chip">🇷🇺 Русский</div>
+        <div class="lang-chip">🇯🇵 日本語</div>
+        <div class="lang-chip">🇰🇷 한국어</div>
+        <div class="lang-chip">🇹🇭 ไทย</div>
+      </div>
+    </div>
+    <div class="demo-phone">
+      <div class="phone-frame">
+        <div class="phone-notch"></div>
+        <div class="phone-screen" id="chatScreen">
+          <div class="chat-header">
+            <div class="chat-avatar">💎</div>
+            <div><div class="chat-name">TON TE AI</div><div class="chat-status">● online</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- TECH -->
+<section class="section container">
+  <div class="reveal">
+    <div class="section-label">Architecture</div>
+    <div class="section-title">Built for speed<br>and reliability.</div>
+    <p style="color:rgba(232,240,254,0.55);font-size:16px;line-height:1.7;max-width:640px;margin-bottom:32px;"><strong>DeepSeek</strong> orchestrates tools (not a single raw completion). <strong>python-telegram-bot</strong> + SQLite for state. Optional <strong>@ton/mcp</strong> JSON-RPC for sends, swaps, red-packet payouts.</p>
+    <div class="tech-row">
+      <span class="tech-tag">DeepSeek + tool calls</span>
+      <span class="tech-tag">Groq Whisper STT</span>
+      <span class="tech-tag">cantonese.ai TTS</span>
+      <span class="tech-tag">Edge TTS fallback</span>
+      <span class="tech-tag">TonCenter v2</span>
+      <span class="tech-tag">TonAPI REST</span>
+      <span class="tech-tag">STON.fi</span>
+      <span class="tech-tag">@ton/mcp HTTP</span>
+      <span class="tech-tag">SQLite</span>
+      <span class="tech-tag">InlineQueryHandler</span>
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer class="footer">
+  <div class="footer-brand"><span style="color:var(--ton-blue)">TON</span> TE <span style="color:var(--ton-purple)">AI</span></div>
+  <p>Built by TechEscrow — Identity Hub AI Hackathon 2026</p>
+  <p style="margin-top:12px;"><a href="https://t.me/TON_TE_Ai_bot" style="color:var(--ton-accent);text-decoration:none;">t.me/TON_TE_Ai_bot →</a></p>
+</footer>
+
+<script>
+// Particles
+const pc = document.getElementById('particles');
+for(let i=0;i<40;i++){
+  const p = document.createElement('div');
+  p.className='particle';
+  p.style.left = Math.random()*100+'%';
+  p.style.animationDelay = Math.random()*8+'s';
+  p.style.animationDuration = (6+Math.random()*6)+'s';
+  pc.appendChild(p);
+}
+
+// Scroll reveal
+const obs = new IntersectionObserver(entries=>{
+  entries.forEach(e=>{ if(e.isIntersecting) e.target.classList.add('visible'); });
+},{threshold:0.1});
+document.querySelectorAll('.reveal').forEach(el=>obs.observe(el));
+
+// Chat animation — looping demo conversation
+const chatData = [
+  {type:'bot', html:'💎 <b>TON TE AI</b> 💎<br><br>7 languages · voice STT→TTS · red packets · inline NFT.<br><br>Type or speak — DeepSeek picks TonAPI / TonCenter / MCP tools.'},
+  {type:'buttons', items:['🔍 Scan','🧧 Red Packet','📝 Translate','🌐 Language']},
+  {type:'user', html:"What's the price of NOT?"},
+  {type:'bot', html:'📊 <b>Notcoin (NOT)</b><br>Price · mcap · pools · risk<br><small style="opacity:.75">TonAPI + STON.fi</small>'},
+  {type:'user', html:'🧧 @TON_TE_Ai_bot 0.5 3'},
+  {type:'bot', html:'🧧 <b>Red packet card</b> (inline)<br>Open → DM → send UQ… to claim<br><small style="opacity:.75">MCP payout when configured</small>'},
+  {type:'user', html:'🖼 @TON_TE_Ai_bot foundation.ton'},
+  {type:'bot', html:'🖼 <b>NFT / DNS</b><br>Preview + Getgems · TONViewer<br><small style="opacity:.75">TonAPI DNS + collections</small>'},
+];
+
+const screen = document.getElementById('chatScreen');
+let chatIdx = 0;
+
+function addChat(){
+  if(chatIdx >= chatData.length){
+    setTimeout(()=>{
+      const msgs = screen.querySelectorAll('.msg, .btn-row');
+      msgs.forEach(m=>m.remove());
+      chatIdx = 0;
+      setTimeout(addChat, 800);
+    }, 4000);
+    return;
+  }
+  const item = chatData[chatIdx];
+  chatIdx++;
+
+  if(item.type === 'buttons'){
+    const row = document.createElement('div');
+    row.className = 'btn-row';
+    row.style.animation = 'msgIn .5s ease-out forwards';
+    item.items.forEach(t=>{
+      const b = document.createElement('span');
+      b.className = 'chat-btn';
+      b.textContent = t;
+      row.appendChild(b);
+    });
+    screen.appendChild(row);
+  } else {
+    const div = document.createElement('div');
+    div.className = 'msg ' + (item.type==='user'?'msg-user':'msg-bot');
+    div.innerHTML = item.html;
+    div.style.animation = 'msgIn .5s ease-out forwards';
+    screen.appendChild(div);
+  }
+  screen.scrollTop = screen.scrollHeight;
+  setTimeout(addChat, item.type==='user'? 1200 : 2000);
+}
+setTimeout(addChat, 1500);
+</script>
+</body>
+</html>
