@@ -46,6 +46,10 @@ except ValueError:
     CANTONESE_SPEED_EN = 1.0
 
 # TON
+# Catchain 2.0 (sub-second blocks, ~2026): this bot uses one-shot HTTP reads (TonCenter v2 + TonAPI),
+# not Streaming API v2 — fine for on-demand balance/tx/NFT; indexers get fresher data as backends upgrade.
+# For sends, latency/finality depends on @ton/mcp + wallet node: keep MCP stack & liteservers updated.
+# Optional hardening later: Ton Center Streaming API v2 + pending→finalized states if you add live tx tracking.
 TON_NETWORK = os.environ.get("TON_NETWORK", "mainnet")  # mainnet | testnet
 TONCENTER_API_KEY = os.environ.get("TONCENTER_API_KEY", "")
 TONCENTER_BASE = "https://testnet.toncenter.com/api/v2" if TON_NETWORK == "testnet" else "https://toncenter.com/api/v2"

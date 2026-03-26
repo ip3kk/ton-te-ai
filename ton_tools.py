@@ -12,6 +12,9 @@ from config import TONCENTER_BASE, TONAPI_BASE, TONCENTER_API_KEY
 
 TON_ADDR_RE = re.compile(r"(?:EQ|UQ)[a-zA-Z0-9_-]{44,48}")
 
+# Avoid hanging reads if TonCenter/TonAPI slow under higher block rates (Catchain 2.0 era).
+_HTTP_TIMEOUT = aiohttp.ClientTimeout(total=22, connect=6, sock_read=18)
+
 
 def _toncenter_url(path: str, params: Optional[dict] = None) -> str:
     base = TONCENTER_BASE.rstrip("/")
@@ -23,7 +26,7 @@ def _toncenter_url(path: str, params: Optional[dict] = None) -> str:
 
 
 async def _get(url: str) -> dict:
-    async with aiohttp.ClientSession() as session:
+    async with aiohttp.ClientSession(timeout=_HTTP_TIMEOUT) as session:
         async with session.get(url) as resp:
             return await resp.json()
 
@@ -130,7 +133,7 @@ async def get_jettons(address: str) -> tuple[str, bool]:
         return "Invalid TON address format", False
     url = f"{TONAPI_BASE.rstrip('/')}/accounts/{address}/jettons"
     try:
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(timeout=_HTTP_TIMEOUT) as session:
             async with session.get(url) as resp:
                 if resp.status != 200:
                     return "Failed to fetch jettons", False
@@ -160,7 +163,7 @@ async def get_nfts(address: str) -> tuple[str, bool]:
         return "Invalid TON address format", False
     url = f"{TONAPI_BASE.rstrip('/')}/accounts/{address}/nfts"
     try:
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(timeout=_HTTP_TIMEOUT) as session:
             async with session.get(url) as resp:
                 if resp.status != 200:
                     return "Failed to fetch NFTs", False
@@ -186,7 +189,7 @@ async def get_nft_item_info(address: str) -> tuple[str, bool, Optional[str]]:
 
     acct_url = f"{TONAPI_BASE.rstrip('/')}/accounts/{address}"
     try:
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(timeout=_HTTP_TIMEOUT) as session:
             async with session.get(acct_url) as resp:
                 if resp.status != 200:
                     return "NOT_NFT", False, None
@@ -205,7 +208,7 @@ async def get_nft_item_info(address: str) -> tuple[str, bool, Optional[str]]:
     if is_collection:
         col_url = f"{TONAPI_BASE.rstrip('/')}/nfts/collections/{address}"
         try:
-            async with aiohttp.ClientSession() as session:
+            async with aiohttp.ClientSession(timeout=_HTTP_TIMEOUT) as session:
                 async with session.get(col_url) as resp:
                     if resp.status == 200:
                         col = await resp.json()
@@ -239,7 +242,7 @@ async def get_nft_item_info(address: str) -> tuple[str, bool, Optional[str]]:
 
     nft_url = f"{TONAPI_BASE.rstrip('/')}/nfts/{address}"
     try:
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(timeout=_HTTP_TIMEOUT) as session:
             async with session.get(nft_url) as resp:
                 if resp.status != 200:
                     return f"NFT item at {address} (details unavailable)", True, None
@@ -304,7 +307,7 @@ async def get_jetton_info(address: str) -> tuple[str, bool]:
 
     url = f"{TONAPI_BASE.rstrip('/')}/jettons/{address}"
     try:
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(timeout=_HTTP_TIMEOUT) as session:
             async with session.get(url) as resp:
                 if resp.status == 404:
                     return "NOT_A_JETTON", False
@@ -337,7 +340,7 @@ async def get_jetton_info(address: str) -> tuple[str, bool]:
     tags = []
     try:
         ston_url = f"https://api.ston.fi/v1/assets/{address}"
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(timeout=_HTTP_TIMEOUT) as session:
             async with session.get(ston_url) as resp:
                 if resp.status == 200:
                     ston = await resp.json()
@@ -359,7 +362,7 @@ async def get_jetton_info(address: str) -> tuple[str, bool]:
     try:
         pools_url = "https://api.ston.fi/v1/pools/query"
         payload = {"search_terms": [address], "limit": 5}
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(timeout=_HTTP_TIMEOUT) as session:
             async with session.post(pools_url, json=payload) as resp:
                 if resp.status == 200:
                     pools_data = await resp.json()
@@ -391,7 +394,7 @@ async def get_jetton_info(address: str) -> tuple[str, bool]:
     top10_pct = 0.0
     try:
         h_url = f"{TONAPI_BASE.rstrip('/')}/jettons/{address}/holders?limit=10"
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(timeout=_HTTP_TIMEOUT) as session:
             async with session.get(h_url) as resp:
                 if resp.status == 200:
                     h_data = await resp.json()
@@ -518,7 +521,7 @@ async def _fetch_all_assets() -> list:
     if _assets_cache["data"] and now - _assets_cache["ts"] < _CACHE_TTL:
         return _assets_cache["data"]
     try:
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(timeout=_HTTP_TIMEOUT) as session:
             async with session.get("https://api.ston.fi/v1/assets") as resp:
                 if resp.status != 200:
                     return _assets_cache["data"]
@@ -649,7 +652,7 @@ async def resolve_dns(domain: str) -> tuple[str, bool]:
         domain = f"{domain}.ton"
     url = f"{TONAPI_BASE.rstrip('/')}/dns/{domain}/resolve"
     try:
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(timeout=_HTTP_TIMEOUT) as session:
             async with session.get(url) as resp:
                 if resp.status != 200:
                     return "Domain not found or failed to resolve", False
@@ -733,7 +736,7 @@ async def get_swap_quote(from_token: str, to_token: str, amount: str) -> tuple[s
         f"&slippage_tolerance=0.01"
     )
     try:
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(timeout=_HTTP_TIMEOUT) as session:
             async with session.post(url) as resp:
                 if resp.status != 200:
                     body = await resp.text()
@@ -777,7 +780,7 @@ async def nft_fetch_item(address: str) -> Optional[dict]:
     """Fetch a single NFT item by raw (0:hex) or friendly address."""
     url = f"{TONAPI_BASE.rstrip('/')}/nfts/{address}"
     try:
-        async with aiohttp.ClientSession() as s:
+        async with aiohttp.ClientSession(timeout=_HTTP_TIMEOUT) as s:
             async with s.get(url) as r:
                 if r.status == 200:
                     return await r.json()
@@ -790,7 +793,7 @@ async def nft_fetch_collection_items(collection_addr: str, limit: int = 15) -> l
     """Fetch NFT items from a collection."""
     url = f"{TONAPI_BASE.rstrip('/')}/nfts/collections/{collection_addr}/items?limit={limit}"
     try:
-        async with aiohttp.ClientSession() as s:
+        async with aiohttp.ClientSession(timeout=_HTTP_TIMEOUT) as s:
             async with s.get(url) as r:
                 if r.status == 200:
                     data = await r.json()
@@ -804,7 +807,7 @@ async def nft_resolve_dns(domain: str) -> Optional[dict]:
     """Resolve a .ton domain via tonapi DNS and return the NFT item dict."""
     url = f"{TONAPI_BASE.rstrip('/')}/dns/{domain}"
     try:
-        async with aiohttp.ClientSession() as s:
+        async with aiohttp.ClientSession(timeout=_HTTP_TIMEOUT) as s:
             async with s.get(url) as r:
                 if r.status == 200:
                     data = await r.json()
@@ -820,7 +823,7 @@ async def nft_fetch_auctions(limit: int = 20) -> list[dict]:
     """Fetch active DNS auctions from tonapi."""
     url = f"{TONAPI_BASE.rstrip('/')}/dns/auctions"
     try:
-        async with aiohttp.ClientSession() as s:
+        async with aiohttp.ClientSession(timeout=_HTTP_TIMEOUT) as s:
             async with s.get(url) as r:
                 if r.status == 200:
                     data = await r.json()
