@@ -1,0 +1,16 @@
+[Unit]
+Description=TON TE AI Telegram Bot (tonpal)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/tonpal
+EnvironmentFile=-/root/tonpal/.env
+ExecStart=/usr/bin/python3 /root/tonpal/bot.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

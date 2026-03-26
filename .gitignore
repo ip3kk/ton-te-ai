@@ -1,4 +1,6 @@
 .env
+.env.*
+!.env.example
 .groq_backup
 __pycache__/
 *.pyc
@@ -7,3 +9,6 @@ data/
 .DS_Store
 demo/*.py
 demo/*.log
+*.session
+*.session-journal
+.cursor/debug-*.log
