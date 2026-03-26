@@ -24,6 +24,9 @@ import speech_recognition as sr
 from pydub import AudioSegment
 
 _START_DEBOUNCE: dict[int, float] = {}
+# 同一訪客通知管理員嘅最短間隔（秒），避免瘋狂撳掣洗爆私訊
+_ADMIN_VISITOR_NOTIFY_LAST: dict[int, float] = {}
+_ADMIN_VISITOR_NOTIFY_COOLDOWN_SEC = 45.0
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile, InlineQueryResultArticle, InlineQueryResultPhoto, InputTextMessageContent, InlineQueryResultCachedPhoto
 from telegram.ext import (
@@ -52,8 +55,10 @@ from redpacket import (
     create_packet,
     get_packet,
     get_claim_count,
+    get_reserved_claim_count,
     has_claimed,
     allocate_claim,
+    release_failed_claim,
     set_claim_tx_result,
     nanoton_to_ton,
     raw_to_usdt,
@@ -66,6 +71,7 @@ from redpacket import (
     get_admin_dashboard_stats,
     record_bot_user,
     list_recent_bot_users,
+    list_recent_claims,
 )
 from mcp_client import mcp_send_ton, mcp_send_jetton, mcp_get_balance, is_mcp_available
 
@@ -973,8 +979,8 @@ def _heard_reply_caption(transcribed: str, reply: str, lang: str, *, translate_o
             r_raw = r_raw[:-80] if len(r_raw) > 80 else r_raw[:-1]
 
 
-def _main_buttons(context) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
+def _main_buttons(context, user_id: Optional[int] = None) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = [
         [
             InlineKeyboardButton(_t(context, "btn_howto"), callback_data="act_howto"),
             InlineKeyboardButton(_t(context, "btn_translate"), callback_data="act_translate"),
@@ -999,7 +1005,10 @@ def _main_buttons(context) -> InlineKeyboardMarkup:
         [
             InlineKeyboardButton(_t(context, "btn_redpacket"), callback_data="act_redpacket"),
         ],
-    ])
+    ]
+    if user_id is not None and user_id in BOT_ADMIN_IDS:
+        rows.append([InlineKeyboardButton("🔐 後台", callback_data="act_admin")])
+    return InlineKeyboardMarkup(rows)
 
 
 def _back_button(context) -> InlineKeyboardMarkup:
@@ -1011,10 +1020,12 @@ def _back_button(context) -> InlineKeyboardMarkup:
 async def _update_group_cards(context, packet_id: str, packet: dict, bot_username: str):
     """Update all tracked group/inline messages for a red packet after a claim."""
     claimed = get_claim_count(packet_id)
+    reserved = get_reserved_claim_count(packet_id)
     count = packet["share_count"]
     asset = packet.get("asset_type") or "TON"
     total = packet["total_amount_real"]
     fully_claimed = claimed >= count
+    slots_open = reserved < count
 
     if fully_claimed:
         card_text = _t(context, "redpacket_all_claimed").format(total=total, asset=asset, count=count)
@@ -1023,8 +1034,11 @@ async def _update_group_cards(context, packet_id: str, packet: dict, bot_usernam
     else:
         card_text = _t(context, "redpacket_group_card").format(total=total, asset=asset, count=count, claimed=claimed)
         caption = f"🧧 <b>Red Packet</b>  ·  {total} {asset} × {count}\n{claimed}/{count} claimed\n\nPowered by <b>TON TE AI</b>"
-        claim_url = f"https://t.me/{bot_username}?start={packet_id}"
-        markup = InlineKeyboardMarkup([[InlineKeyboardButton("🧧 Open Red Packet", url=claim_url)]])
+        if slots_open:
+            claim_url = f"https://t.me/{bot_username}?start={packet_id}"
+            markup = InlineKeyboardMarkup([[InlineKeyboardButton("🧧 Open Red Packet", url=claim_url)]])
+        else:
+            markup = InlineKeyboardMarkup([])
 
     for m in get_group_messages(packet_id):
         try:
@@ -1158,7 +1172,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text = _t(context, "redpacket_expired")
         elif has_claimed(packet_id, user_id):
             text = _t(context, "redpacket_already_claimed")
-        elif get_claim_count(packet_id) >= p["share_count"]:
+        elif get_reserved_claim_count(packet_id) >= p["share_count"]:
             text = _t(context, "redpacket_no_slots")
         else:
             saved_addr = get_saved_address(user_id)
@@ -1179,8 +1193,10 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         text = _t(context, "redpacket_success").format(amount=f"{amount_display} {unit}")
                         await _update_group_cards(context, packet_id, p, bot_uname)
                     else:
+                        release_failed_claim(packet_id, claim_idx)
                         text = _t(context, "redpacket_failed").format(err=mcp_out)
-                    await context.bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML", reply_markup=_main_buttons(context))
+                        await _update_group_cards(context, packet_id, p, bot_uname)
+                    await context.bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML", reply_markup=_main_buttons(context, user_id))
                     return
                 text = _t(context, "redpacket_no_slots")
             else:
@@ -1208,14 +1224,14 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 photo=InputFile(f),
                 caption=text,
                 parse_mode="HTML",
-                reply_markup=_main_buttons(context),
+                reply_markup=_main_buttons(context, user_id),
             )
     else:
         sent = await context.bot.send_message(
             chat_id=chat_id,
             text=text,
             parse_mode="HTML",
-            reply_markup=_main_buttons(context),
+            reply_markup=_main_buttons(context, user_id),
         )
     context.user_data["_banner_msg_id"] = sent.message_id
 
@@ -1235,11 +1251,31 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
+    if not query:
+        return
+    data = query.data or ""
+
+    if data == "act_admin":
+        u = query.from_user
+        if not u or u.id not in BOT_ADMIN_IDS:
+            try:
+                await query.answer("無權限", show_alert=True)
+            except Exception:
+                pass
+            return
+        try:
+            await query.answer()
+        except Exception:
+            pass
+        if query.message:
+            admin_uid = u.id
+            await send_admin_dashboard(context, query.message, admin_user_id=admin_uid)
+        return
+
     try:
         await query.answer()
     except Exception:
         pass
-    data = query.data
 
     if data.startswith("voice_"):
         parts = data.split("_", 1)
@@ -1298,9 +1334,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "act_home":
         context.user_data.pop("translate_mode", None)
         lang = (context.user_data or {}).get("lang", "en")
+        uid = query.from_user.id if query.from_user else None
         await _edit_caption_or_text(
             query, LANG_TEXTS[lang]["welcome"],
-            parse_mode="HTML", reply_markup=_main_buttons(context),
+            parse_mode="HTML", reply_markup=_main_buttons(context, uid),
         )
         return
 
@@ -1310,9 +1347,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["lang"] = lang
         welcome = LANG_TEXTS[lang]["welcome"]
         lang_set = LANG_TEXTS[lang]["lang_set"]
+        uid = query.from_user.id if query.from_user else None
         await _edit_caption_or_text(
             query, welcome + "\n\n" + lang_set,
-            parse_mode="HTML", reply_markup=_main_buttons(context),
+            parse_mode="HTML", reply_markup=_main_buttons(context, uid),
         )
         return
 
@@ -1555,12 +1593,13 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     transcribed = await _voice_to_text(tmp.name, lang)
     if not transcribed:
         fail_text = _t(context, "voice_not_recognized")
+        uid = msg.from_user.id if msg.from_user else None
         if banner_id:
             try:
-                await context.bot.edit_message_caption(chat_id=chat_id, message_id=banner_id, caption=fail_text, reply_markup=_main_buttons(context))
+                await context.bot.edit_message_caption(chat_id=chat_id, message_id=banner_id, caption=fail_text, reply_markup=_main_buttons(context, uid))
             except Exception:
                 try:
-                    await context.bot.edit_message_text(chat_id=chat_id, message_id=banner_id, text=fail_text, reply_markup=_main_buttons(context))
+                    await context.bot.edit_message_text(chat_id=chat_id, message_id=banner_id, text=fail_text, reply_markup=_main_buttons(context, uid))
                 except Exception:
                     pass
         return
@@ -1695,6 +1734,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     banner_id = user_data.get("_banner_msg_id")
     user_message = text
     chat_id = msg.chat_id
+    reply_uid = msg.from_user.id if msg.from_user else None
 
     # P1: Group red packet card — when someone shares a deep link in a group
     chat_type = (msg.chat.type if msg.chat else None) or ""
@@ -1705,6 +1745,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             p = get_packet(packet_id)
             if p:
                 claimed = get_claim_count(packet_id)
+                reserved = get_reserved_claim_count(packet_id)
                 total = p["total_amount_real"]
                 count = p["share_count"]
                 asset = p.get("asset_type") or "TON"
@@ -1716,8 +1757,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     markup = InlineKeyboardMarkup([])
                 else:
                     cap = f"🧧 <b>Red Packet</b>  ·  {total} {asset} × {count} {mode_label}\n{claimed}/{count} claimed\n\nPowered by <b>TON TE AI</b>"
-                    claim_url = f"https://t.me/{bot_uname}?start={packet_id}"
-                    markup = InlineKeyboardMarkup([[InlineKeyboardButton("🧧 Open Red Packet", url=claim_url)]])
+                    if reserved < count:
+                        claim_url = f"https://t.me/{bot_uname}?start={packet_id}"
+                        markup = InlineKeyboardMarkup([[InlineKeyboardButton("🧧 Open Red Packet", url=claim_url)]])
+                    else:
+                        markup = InlineKeyboardMarkup([])
                 rp_img = Path(__file__).parent / "data" / "redpacket_card.png"
                 if rp_img.exists():
                     with open(rp_img, "rb") as f:
@@ -1803,7 +1847,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if get_packet(packet_id):
                 if has_claimed(packet_id, msg.from_user.id if msg.from_user else 0):
                     out = _t(context, "redpacket_already_claimed")
-                elif get_claim_count(packet_id) >= (get_packet(packet_id) or {}).get("share_count", 0):
+                elif get_reserved_claim_count(packet_id) >= (get_packet(packet_id) or {}).get("share_count", 0):
                     out = _t(context, "redpacket_no_slots")
             await _edit_banner_or_send(context, chat_id, out, reply_markup=_back_button(context))
             return
@@ -1826,13 +1870,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 bot_me = await context.bot.get_me()
                 await _update_group_cards(context, packet_id, p, bot_me.username or "TON_TE_Ai_bot")
         else:
+            release_failed_claim(packet_id, claim_idx)
             out = _t(context, "redpacket_failed").format(err=mcp_out)
+            p = get_packet(packet_id)
+            if p:
+                bot_me = await context.bot.get_me()
+                await _update_group_cards(context, packet_id, p, bot_me.username or "TON_TE_Ai_bot")
         _START_DEBOUNCE[chat_id] = time.time()
         try:
             await msg.delete()
         except Exception:
             pass
-        await _edit_banner_or_send(context, chat_id, out, reply_markup=_main_buttons(context))
+        await _edit_banner_or_send(context, chat_id, out, reply_markup=_main_buttons(context, reply_uid))
         return
 
     # Red packet create: user sends "amount count [mode] [usdt]"
@@ -1876,7 +1925,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await msg.delete()
         except Exception:
             pass
-        await _edit_banner_or_send(context, chat_id, out, reply_markup=_main_buttons(context))
+        await _edit_banner_or_send(context, chat_id, out, reply_markup=_main_buttons(context, reply_uid))
         return
 
     from ton_tools import TON_ADDR_RE as _ADDR_RE
@@ -2037,6 +2086,29 @@ async def cmd_trending(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _edit_banner_or_send(context, update.effective_chat.id, out)
 
 
+async def _notify_admins_visitor_ping(
+    context: ContextTypes.DEFAULT_TYPE,
+    visitor_id: int,
+    username: Optional[str],
+    first_name: Optional[str],
+    last_name: Optional[str],
+) -> None:
+    """Push a short DM to every admin when a non-admin uses the bot (cooldown in track_bot_user)."""
+    un = f"@{username}" if username else "—"
+    nm = " ".join(x for x in (first_name or "", last_name or "") if x).strip() or "—"
+    text = (
+        "👆 <b>有人用機械人</b>\n"
+        f"<code>{visitor_id}</code> {html.escape(un)} · {html.escape(nm)}"
+    )
+    for aid in BOT_ADMIN_IDS:
+        if aid == visitor_id:
+            continue
+        try:
+            await context.bot.send_message(chat_id=aid, text=text, parse_mode="HTML")
+        except Exception as e:
+            log.warning("admin visitor notify failed for admin_id=%s: %s", aid, e)
+
+
 async def track_bot_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Log every Telegram user who touches the bot (for /admin list)."""
     u = update.effective_user
@@ -2046,15 +2118,65 @@ async def track_bot_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
         record_bot_user(u.id, u.username, u.first_name, u.last_name)
     except Exception as e:
         log.debug("track_bot_user: %s", e)
+        return
+
+    if u.id not in BOT_ADMIN_IDS:
+        now = time.time()
+        last = _ADMIN_VISITOR_NOTIFY_LAST.get(u.id, 0.0)
+        if now - last >= _ADMIN_VISITOR_NOTIFY_COOLDOWN_SEC:
+            _ADMIN_VISITOR_NOTIFY_LAST[u.id] = now
+            if len(_ADMIN_VISITOR_NOTIFY_LAST) > 8000:
+                _ADMIN_VISITOR_NOTIFY_LAST.clear()
+            asyncio.create_task(
+                _notify_admins_visitor_ping(
+                    context, u.id, u.username, u.first_name, u.last_name
+                )
+            )
 
 
-async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Telegram-only admin dashboard; only BOT_ADMIN_IDS get a reply (others: silent)."""
-    if not update.message:
-        return
-    u = update.effective_user
-    if not u or u.id not in BOT_ADMIN_IDS:
-        return
+def _admin_format_claim_row(r: dict) -> str:
+    uid = r["user_id"]
+    addr = html.escape((r.get("to_address") or "").strip())
+    pid_full = str(r.get("packet_id") or "")
+    pid = html.escape(pid_full)
+    idx = r.get("claim_idx", 0)
+    ts = time.strftime("%m-%d %H:%M", time.gmtime(r["claimed_at"]))
+    tx = r.get("tx_result") or ""
+    tx_short = (tx[:100] + "…") if len(tx) > 100 else tx
+    tx_disp = html.escape(tx_short) if tx else "—"
+    vun = r.get("visitor_username")
+    vlabel = f" @{html.escape(vun)}" if vun else ""
+    vfn = (r.get("visitor_first_name") or "").strip()
+    if vfn:
+        vlabel = f"{vlabel} · {html.escape(vfn)}"
+    amt_raw = (r.get("amount_real") or "").strip()
+    asset = (r.get("packet_asset_type") or "TON").upper()
+    try:
+        if asset == "USDT" and amt_raw:
+            amt_human = f"{raw_to_usdt(amt_raw)} USDT"
+        elif amt_raw:
+            amt_human = f"{nanoton_to_ton(amt_raw)} TON"
+        else:
+            amt_human = "—"
+    except Exception:
+        amt_human = amt_raw or "—"
+    amt_disp = html.escape(amt_human)
+    return (
+        f"<code>{uid}</code>{vlabel}\n"
+        f"  📦 <code>{pid}</code> #{idx} · {amt_disp}\n"
+        f"  📍 <code>{addr}</code>\n"
+        f"  ⛓ {tx_disp}\n"
+        f"  🕐 {ts} UTC"
+    )
+
+
+async def send_admin_dashboard(
+    context: ContextTypes.DEFAULT_TYPE,
+    message,
+    admin_user_id: Optional[int] = None,
+) -> None:
+    """Push full admin stats + claims (used by /admin and 🔐 後台 button)."""
+    admin_id = admin_user_id if admin_user_id is not None else (message.from_user.id if message.from_user else 0)
     s = get_admin_dashboard_stats()
     if is_mcp_available():
         bal_raw, ok = await mcp_get_balance()
@@ -2075,14 +2197,51 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     recent_block = "\n".join(lines) if lines else "（未有記錄，有人撳過機械人後會出現）"
 
     text = (
-        f"🔐 <b>後台</b> · 你嘅 ID：<code>{u.id}</code>\n\n"
-        f"<b>用過機械人</b>：<b>{s['bot_users_n']}</b> 個帳號\n"
-        f"<b>最近 20 個</b>（按最後活動）：\n{recent_block}\n\n"
+        f"🔐 <b>後台</b> · 管理員 ID：<code>{admin_id}</code>\n"
+        f"<i>（撳 <b>🔐 後台</b> 或 <code>/admin</code>）</i>\n\n"
+        f"<b>撳過／用過機械人</b>：<b>{s['bot_users_n']}</b> 個 Telegram 帳號\n"
+        f"<b>最近 20 個</b>（每行：<b>Telegram user_id</b> · @username · 名 · 互動次數 · 時間）：\n"
+        f"{recent_block}\n\n"
         f"紅包：總 <b>{s['total_packets']}</b> · 未過期 <b>{s['active_packets']}</b> · 24h 新建 <b>{s['packets_24h']}</b>\n"
         f"領取：總 <b>{s['total_claims']}</b> · 24h <b>{s['claims_24h']}</b> · 已儲地址 <b>{s['saved_addresses']}</b>\n\n"
         f"<b>Hot wallet</b>\n{bal_line}"
     )
-    await update.message.reply_text(text, parse_mode="HTML")
+    await message.reply_text(text, parse_mode="HTML")
+
+    claim_rows = list_recent_claims(25)
+    if not claim_rows:
+        await message.reply_text(
+            "📋 <b>最近領取</b>：暫未有記錄。",
+            parse_mode="HTML",
+        )
+        return
+    header = (
+        "📋 <b>最近領取</b>（<b>Telegram user_id</b> → 收款地址 · 紅包 id · 金額原始值 · tx）：\n\n"
+    )
+    cont_header = "📋 <b>最近領取（續）</b>\n\n"
+    parts: list[str] = []
+    current = header
+    for r in claim_rows:
+        row = _admin_format_claim_row(r) + "\n\n"
+        if len(current) + len(row) > 4000:
+            parts.append(current.rstrip())
+            current = cont_header + row
+        else:
+            current += row
+    parts.append(current.rstrip())
+    for i, p in enumerate(parts):
+        suffix = f" <i>({i + 1}/{len(parts)})</i>" if len(parts) > 1 else ""
+        await message.reply_text(p + suffix, parse_mode="HTML")
+
+
+async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Telegram-only admin dashboard; only BOT_ADMIN_IDS get a reply (others: silent)."""
+    if not update.message:
+        return
+    u = update.effective_user
+    if not u or u.id not in BOT_ADMIN_IDS:
+        return
+    await send_admin_dashboard(context, update.message, admin_user_id=u.id)
 
 
 def _nft_to_inline_result(nft: dict, bot_username: str) -> InlineQueryResultPhoto | InlineQueryResultArticle | None:
