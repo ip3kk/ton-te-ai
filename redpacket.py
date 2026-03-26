@@ -157,6 +157,26 @@ def list_recent_bot_users(limit: int = 25) -> List[dict[str, Any]]:
     return [dict(r) for r in rows]
 
 
+def list_recent_claims(limit: int = 30) -> List[dict[str, Any]]:
+    """Recent red-packet claims for admin (user_id, payout address, amounts)."""
+    with _get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT c.packet_id, c.claim_idx, c.user_id, c.to_address, c.amount_real,
+                   c.tx_result, c.claimed_at,
+                   b.username AS visitor_username, b.first_name AS visitor_first_name,
+                   p.asset_type AS packet_asset_type
+            FROM claims c
+            LEFT JOIN bot_users b ON c.user_id = b.user_id
+            LEFT JOIN packets p ON c.packet_id = p.packet_id
+            ORDER BY c.claimed_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def get_admin_dashboard_stats() -> dict:
     """Read-only stats for /admin (Telegram owner dashboard)."""
     now = time.time()
@@ -167,9 +187,19 @@ def get_admin_dashboard_stats() -> dict:
         active_packets = conn.execute(
             "SELECT COUNT(*) FROM packets WHERE expires_at > ?", (now,)
         ).fetchone()[0]
-        total_claims = conn.execute("SELECT COUNT(*) FROM claims").fetchone()[0]
+        total_claims = conn.execute(
+            """
+            SELECT COUNT(*) FROM claims
+            WHERE tx_result IS NOT NULL AND TRIM(tx_result) != ''
+            """
+        ).fetchone()[0]
         claims_24h = conn.execute(
-            "SELECT COUNT(*) FROM claims WHERE claimed_at > ?", (day_ago,)
+            """
+            SELECT COUNT(*) FROM claims
+            WHERE claimed_at > ?
+              AND tx_result IS NOT NULL AND TRIM(tx_result) != ''
+            """,
+            (day_ago,),
         ).fetchone()[0]
         saved_addrs = conn.execute("SELECT COUNT(*) FROM user_addresses").fetchone()[0]
         packets_24h = conn.execute(
@@ -362,7 +392,22 @@ def get_packet(packet_id: str) -> Optional[dict]:
 
 
 def get_claim_count(packet_id: str) -> int:
-    """Number of claims so far."""
+    """Successful on-chain sends only (matches group card / user-visible progress)."""
+    with _get_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT COUNT(*) FROM claims
+            WHERE packet_id = ?
+              AND tx_result IS NOT NULL
+              AND TRIM(tx_result) != ''
+            """,
+            (packet_id,),
+        ).fetchone()
+        return row[0] if row else 0
+
+
+def get_reserved_claim_count(packet_id: str) -> int:
+    """All claim rows (pending MCP or completed); caps how many users can hold a slot."""
     with _get_conn() as conn:
         row = conn.execute(
             "SELECT COUNT(*) FROM claims WHERE packet_id = ?",
@@ -384,35 +429,75 @@ def has_claimed(packet_id: str, user_id: int) -> bool:
 def allocate_claim(packet_id: str, user_id: int, to_address: str) -> Optional[tuple[int, str, str]]:
     """
     Atomically allocate a claim slot when user provides address.
+    Uses the smallest free claim_idx so a row removed after MCP failure can reuse that share.
     Returns (claim_idx, amount_nanoton_str, asset_type) or None.
     """
     p = get_packet(packet_id)
     if not p:
         return None
-    if has_claimed(packet_id, user_id):
-        return None
 
-    claimed_count = get_claim_count(packet_id)
-    if claimed_count >= p["share_count"]:
-        return None
-
+    share_count = p["share_count"]
     shares = p["shares"]
-    claim_idx = claimed_count
-    amount_str = shares[claim_idx]
     asset_type = p.get("asset_type") or "TON"
+    addr = to_address.strip()
 
-    with _get_conn() as conn:
+    for attempt in range(5):
         try:
-            conn.execute(
-                """INSERT INTO claims (packet_id, claim_idx, user_id, to_address, amount_real, claimed_at)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                (packet_id, claim_idx, user_id, to_address.strip(), amount_str, time.time()),
-            )
-            conn.commit()
-        except sqlite3.IntegrityError:
-            return None
+            with _get_conn() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                row = conn.execute(
+                    "SELECT 1 FROM claims WHERE packet_id = ? AND user_id = ?",
+                    (packet_id, user_id),
+                ).fetchone()
+                if row:
+                    conn.rollback()
+                    return None
 
-    return claim_idx, amount_str, asset_type
+                idx_rows = conn.execute(
+                    "SELECT claim_idx FROM claims WHERE packet_id = ?",
+                    (packet_id,),
+                ).fetchall()
+                used = {int(r[0]) for r in idx_rows}
+                claim_idx: Optional[int] = None
+                for i in range(share_count):
+                    if i not in used:
+                        claim_idx = i
+                        break
+                if claim_idx is None:
+                    conn.rollback()
+                    return None
+
+                amount_str = shares[claim_idx]
+                try:
+                    conn.execute(
+                        """INSERT INTO claims (packet_id, claim_idx, user_id, to_address, amount_real, claimed_at)
+                           VALUES (?, ?, ?, ?, ?, ?)""",
+                        (packet_id, claim_idx, user_id, addr, amount_str, time.time()),
+                    )
+                    conn.commit()
+                except sqlite3.IntegrityError:
+                    conn.rollback()
+                    continue
+            return claim_idx, amount_str, asset_type
+        except sqlite3.OperationalError:
+            time.sleep(0.02 * (attempt + 1))
+            continue
+
+    return None
+
+
+def release_failed_claim(packet_id: str, claim_idx: int) -> None:
+    """After MCP send failure: drop pending row so the share is free and the user may retry."""
+    with _get_conn() as conn:
+        conn.execute(
+            """
+            DELETE FROM claims
+            WHERE packet_id = ? AND claim_idx = ?
+              AND (tx_result IS NULL OR TRIM(tx_result) = '')
+            """,
+            (packet_id, claim_idx),
+        )
+        conn.commit()
 
 
 def set_claim_tx_result(packet_id: str, claim_idx: int, tx_result: str) -> None:
