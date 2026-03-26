@@ -7,8 +7,7 @@ TON TE AI — Multilingual Voice-Enabled TON Assistant
 User-Facing AI Agents
 
 ## GitHub Repo
-https://github.com/user/tonpal
-(Replace with your actual GitHub repo URL)
+https://github.com/ip3kk/ton-te-ai
 
 ## Demo Bot
 https://t.me/TON_TE_Ai_bot
@@ -46,3 +45,11 @@ TON TE AI is a Telegram bot that makes the TON blockchain accessible to everyone
 
 **Why it matters for TON:**
 One bot, every language, voice-first. We bring TON to billions who can't use English-only tools — including visually impaired users who can speak to the bot and hear responses. Red packets turn TON into a social, shareable experience in any Telegram group.
+
+---
+
+## 發生咩事／點解會似「無參賽資格」（repo 內推斷）
+
+1. **範本 GitHub 未改** — 舊版 `SUBMISSION.md` 寫嘅係占位 `https://github.com/user/tonpal`（唔存在）。若報名表照抄，主辦或自動檢查 **clone／打開 repo 會失敗**，容易顯示不符合提交或驗證唔過。**而家已改做實際公開庫：** `https://github.com/ip3kk/ton-te-ai`。
+2. **官方狀態我哋睇唔到** — Identity Hub 後台要 **你本人登入** [ai-hackathon 頁](https://identityhub.app/contests/ai-hackathon) 先睇到「通過／補件／拒絕」原因；請對照表單上 **GitHub 欄是否仍係舊 link**。
+3. **建議即做** — 若平台允許 **編輯提交**：將 repo 改為 `https://github.com/ip3kk/ton-te-ai`；Track 維持 **User-Facing AI Agents**；Demo 維持 **https://t.me/TON_TE_Ai_bot**。若已截止，用主辦 Discord／email 問 **具體 disqualify 原因**（帶上正確 repo 同 bot link）。
